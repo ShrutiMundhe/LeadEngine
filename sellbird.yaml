@@ -1,44 +1,67 @@
 persona:
-  name: "Alex"
-  company: "Your Company"
+  name: "Shruti Mundhe"
+  company: "Chirayu Power"
   role: "Business Development"
-  email: "alex@yourcompany.com"
-  linkedin: "linkedin.com/in/alex-yourcompany"
+  email: "shrutimundhe22@gmail.com"
+  linkedin: "linkedin.com/company/chirayu-power"
   tone: "professional, consultative, confident"
 
 product:
-  name: "Your Product"
-  description: "Describe what your product does and who it's for"
-  pricing: "Starting at $X/mo"
+  name: "Commercial & Industrial Solar Solutions"
+  description: "Rooftop and ground-mounted solar power solutions for manufacturing plants and commercial facilities to cut power costs by up to 60%"
+  pricing: "Custom ROI-driven proposal"
   key_benefits:
-    - "Benefit 1"
-    - "Benefit 2"
-    - "Benefit 3"
+    - "Drastic reduction in industrial electricity bills"
+    - "Accelerated depreciation and tax benefits under Indian solar policies"
+    - "Turnkey installation, net-metering approval, and maintenance"
   objection_responses:
-    "too expensive": "I understand budget is important. Most of our clients see ROI within 30 days..."
-    "already have a solution": "That makes sense. Curious — what's the one thing you wish it did better?"
-    "not interested": "No worries at all. Mind if I ask what your current approach looks like?"
+    "too expensive": "With accelerated depreciation, tax savings, and captive power savings, typical industrial payback is under 3-4 years."
+    "already have a solution": "Understood. Many plants we work with add captive solar alongside their existing grid/DG setup to cut peak tariff costs."
+    "not interested": "No worries at all. If energy tariffs or ESG sustainability goals become a priority down the line, we'd be happy to share a benchmark report."
   offer:
-    primary: ""                    # Main offer (e.g., "Monthly subscription starting at $99/mo")
-    entry: ""                      # Low-commitment entry (e.g., "14-day free trial", "Free audit")
-    goal: "book_call"              # Goal of outreach: book_call, start_trial, get_reply
-    booking_method: "calendar_link" # calendar_link, suggest_times, ask_preference
-    booking_url: ""                # Calendar link URL (if using calendar_link method)
-    meeting_duration: "15 minutes" # How long the call is
-    meeting_owner: ""              # Who takes the meeting (name or role)
+    primary: "Turnkey Industrial Solar Installation"
+    entry: "Free Solar Feasibility & Energy Cost Savings Audit"
+    goal: "book_call"
+    booking_method: "suggest_times"
+    booking_url: ""
+    meeting_duration: "20 minutes"
+    meeting_owner: "Solar Solutions Consultant"
 
 icp:
   industries:
-    - "SaaS"
-    - "Marketing Agency"
-  company_size: "10-200 employees"
+    - "Manufacturing"
+    - "Industrial Machinery"
+    - "Auto Components & Engineering"
+    - "Textiles & Garments"
+    - "Chemicals & Plastics"
+    - "Steel & Metal Fabrication"
+    - "Food Processing"
+    - "Electrical Equipment"
+  company_size: "20-1000 employees"
   titles:
-    - "VP Marketing"
-    - "Head of Growth"
-    - "CMO"
-    - "Director of Marketing"
+    - "Managing Director"
+    - "Founder"
+    - "Co-Founder"
+    - "CEO"
+    - "Director"
+    - "Plant Head"
+    - "Operations Head"
+    - "General Manager"
+    - "Proprietor"
   geography:
-    - "United States"
+    - "Mumbai"
+    - "Delhi NCR"
+    - "Pune"
+    - "Bengaluru"
+    - "Ahmedabad"
+    - "Surat"
+    - "Chennai"
+    - "Hyderabad"
+    - "Coimbatore"
+    - "Vadodara"
+    - "Rajkot"
+    - "Kolkata"
+    - "India"
   # Roles that signal a company is in-market RIGHT NOW (a company hiring a
   # "Head of Growth" is shopping for growth tooling). Used for careers-page
   # scanning and job-board discovery. Empty = fall back to titles above.

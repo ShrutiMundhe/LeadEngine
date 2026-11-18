@@ -289,7 +289,7 @@ function emptyState(glyph, title, copy) {
 
 function offlineState() {
   return emptyState('&#9888;', 'Dashboard can\'t reach the server',
-    'The dashboard process may have stopped. Restart it with <b>sellbird dashboard</b> and refresh this page.');
+    'The dashboard process may have stopped. Please restart the dashboard and refresh this page.');
 }
 
 async function api(path, opts) {
@@ -672,8 +672,7 @@ async function loadRenameNotice() {
   el.innerHTML =
     '<div class="card rename-card">' +
       '<div><h3>Welcome to Chirayu Power Outreach</h3>' +
-        '<p class="muted">Your settings, data and sign-in came with you. ' +
-        'Use the <code>sellbird</code> command from here on.</p></div>' +
+        '<p class="muted">Your settings, data and configurations are ready.</p></div>' +
       '<div class="rename-actions">' +
         '<button class="btn btn-secondary" onclick="dismissRenameNotice()">Got it</button>' +
       '</div></div>';

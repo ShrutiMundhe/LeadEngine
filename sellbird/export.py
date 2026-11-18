@@ -18,7 +18,7 @@ logger = logging.getLogger("sellbird.export")
 # Column order chosen so the file imports cleanly into cold-email tools
 # without remapping; extra columns are simply available as custom variables.
 CSV_COLUMNS = [
-    "email", "first_name", "last_name", "company_name", "title",
+    "email", "first_name", "last_name", "company_name", "title", "phone",
     "website", "linkedin_url", "industry", "personalization",
     "email_status", "score", "seniority", "source", "status", "created_at",
 ]
@@ -64,10 +64,14 @@ async def collect_prospects(
             where.append(f"status IN ({placeholders})")
             params.extend(statuses)
 
-    sql = "SELECT * FROM prospects"
+    sql = """
+        SELECT p.*, COALESCE(NULLIF(p.phone, ''), c.phone, '') AS resolved_phone
+        FROM prospects p
+        LEFT JOIN companies c ON p.company_id = c.id
+    """
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY score DESC, created_at DESC"
+    sql += " ORDER BY p.score DESC, p.created_at DESC"
 
     async with storage.connect(state.db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -88,6 +92,7 @@ async def collect_prospects(
             "last_name": r.get("last_name", ""),
             "company_name": r.get("company", ""),
             "title": r.get("title", ""),
+            "phone": r.get("resolved_phone") or r.get("phone") or "",
             "website": r.get("source_url", ""),
             "linkedin_url": r.get("linkedin_url", ""),
             "industry": r.get("industry", ""),
@@ -150,6 +155,8 @@ async def export_prospects_csv(
     )
     text = to_csv(rows)
     if out_path:
+        from pathlib import Path
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w", newline="", encoding="utf-8") as f:
             f.write(text)
         logger.info(f"Exported {len(rows)} prospects to {out_path}")
