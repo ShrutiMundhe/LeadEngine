@@ -674,6 +674,71 @@ async def save_company_route(request: Request):
     return {"success": True, "message": "Saved. New emails use it from the next draft."}
 
 
+@app.get("/api/email-setup")
+async def get_email_setup():
+    """Email setup: sending, schedule, footer, signature logo and template."""
+    from sellbird.config import load_config
+    from sellbird.email_setup import view
+    try:
+        return view(load_config(), PROJECT_ROOT)
+    except Exception as e:
+        return JSONResponse({"error": f"Couldn't read your config: {e}"}, status_code=500)
+
+
+@app.post("/api/email-setup")
+async def save_email_setup(request: Request):
+    """Save one card of the Email setup tab to the config file."""
+    from sellbird.email_setup import SetupError, save
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    section = str((body or {}).get("section") or "")
+    fields = (body or {}).get("fields")
+    try:
+        message = save(_offer_config_file(), PROJECT_ROOT, section, fields)
+    except SetupError as e:
+        return JSONResponse({"success": False, "message": f"Not saved: {e}."}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"success": False, "message": f"Couldn't save: {e}"}, status_code=500)
+    return {"success": True, "message": message}
+
+
+@app.get("/api/email-setup/logo")
+async def get_email_logo():
+    """The signature logo, for the preview on the Email setup tab."""
+    from sellbird.config import load_config
+    from sellbird.email_setup import logo_file
+    try:
+        found = logo_file(load_config(), PROJECT_ROOT)
+    except Exception:
+        found = None
+    if not found:
+        return PlainTextResponse("no logo", status_code=404)
+    blob, mime = found
+    return Response(blob, media_type=mime, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/email-setup/logo")
+async def upload_email_logo(request: Request):
+    """Upload the signature logo, sent as JSON {"data": base64}."""
+    from sellbird.email_setup import SetupError, save_logo
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    try:
+        message = save_logo(_offer_config_file(), PROJECT_ROOT, (body or {}).get("data") or "")
+    except SetupError as e:
+        return JSONResponse({"success": False, "message": f"Not saved: {e}."}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"success": False, "message": f"Couldn't save: {e}"}, status_code=500)
+    return {"success": True, "message": message}
+
+
+@app.delete("/api/email-setup/logo")
+async def delete_email_logo():
+    from sellbird.email_setup import SetupError, remove_logo
+    try:
+        return {"success": True, "message": remove_logo(_offer_config_file(), PROJECT_ROOT)}
+    except SetupError as e:
+        return JSONResponse({"success": False, "message": f"Not saved: {e}."}, status_code=400)
+
+
 @app.post("/api/offer/propose")
 async def propose_offer(request: Request):
     """Your agent's proposed offer, waiting for you to use or dismiss it on
@@ -2039,12 +2104,23 @@ async def estimate_discovery(request: Request):
             queries = _discovery_queries(body, load_config())
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        # Map and listings sources search around a point: a city the map
+        # can't place would be skipped silently, so name it now, before a run.
+        unlocated = []
+        if getattr(PROVIDERS[provider], "needs_coordinates", False):
+            from sellbird.collectors.discover import resolve_coordinates
+            state = _state()
+            await state.init_db()
+            await resolve_coordinates(state, queries)
+            unlocated = sorted({q.location for q in queries if q.location and not q.coordinate})
         return {
             "provider": provider,
             "queries": [q.keyword() for q in queries],
             "query_count": len(queries),
             "estimated_cost": round(estimate_cost(provider, queries), 4),
             "free": PROVIDERS[provider].estimate(queries) == 0,
+            "unlocated": unlocated,
+            "located_all": not unlocated or len(unlocated) < len({q.location for q in queries}),
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

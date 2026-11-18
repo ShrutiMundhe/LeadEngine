@@ -426,6 +426,7 @@ function loadCurrentTab() {
     case 'usage': loadUsage(); break;
     case 'settings': loadSettings(); loadSendingModeCard(); break;
     case 'company': loadCompany(); break;
+    case 'emailsetup': loadEmailSetup(); break;
     case 'controls': loadSellbirdStatus(); loadLogs(); break;
   }
 }
@@ -784,12 +785,67 @@ async function loadSignals() {
       '<span class="legend-val">' + p[1] + '<small>' + Math.round(100 * p[1] / all) + '%</small></span></div>'
     ).join('') + '</div></div>';
 
-  grpEl.innerHTML = (data.groups || []).map(g => {
-    // Only the undecided ones: "Confirm all" must never re-enable a signal
-    // you turned off (or "Skip all" turn off one you confirmed).
-    const pending = escHtml(JSON.stringify(g.signals.filter(x => x.status === 'proposed').map(x => x.code)));
-    const undecided = g.signals.filter(x => x.status === 'proposed').length;
-    return '<div class="sig-group">' +
+  renderSignalPage();
+  renderCohortBuilder();
+}
+
+// Signals are shown one category at a time, SIG_PAGE_SIZE to a page, so the
+// list never runs on for screens. A status filter narrows it further.
+const SIG_PAGE_SIZE = 6;
+let _sigGroup = 0, _sigPage = 0, _sigFilter = 'all';
+
+function setSignalView(group, page, filter) {
+  if (filter !== undefined && filter !== _sigFilter) { _sigFilter = filter; page = 0; }
+  if (group !== undefined && group !== _sigGroup) { _sigGroup = group; page = 0; }
+  if (page !== undefined) _sigPage = page;
+  renderSignalPage();
+  const top = document.getElementById('signals-groups');
+  if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({block: 'start'});
+}
+
+function renderSignalPage() {
+  const grpEl = document.getElementById('signals-groups');
+  const groups = (_signals && _signals.groups) || [];
+  if (!groups.length) { grpEl.innerHTML = ''; return; }
+  _sigGroup = Math.min(_sigGroup, groups.length - 1);
+  const keep = s => _sigFilter === 'all' || s.status === _sigFilter;
+  const g = groups[_sigGroup];
+  const shown = g.signals.filter(keep);
+  const pages = Math.max(1, Math.ceil(shown.length / SIG_PAGE_SIZE));
+  _sigPage = Math.min(_sigPage, pages - 1);
+  const slice = shown.slice(_sigPage * SIG_PAGE_SIZE, (_sigPage + 1) * SIG_PAGE_SIZE);
+
+  const tabs = '<div class="sig-tabs" role="tablist">' + groups.map((x, i) => {
+    const waiting = x.signals.filter(s => s.status === 'proposed').length;
+    return '<button role="tab" aria-selected="' + (i === _sigGroup) + '" class="sig-tab' + (i === _sigGroup ? ' on' : '') +
+      '" onclick="setSignalView(' + i + ')">' + escHtml(String(x.label).split(/\s+[—–-]\s+/)[0]) +
+      ' <span class="sig-tab-n">' + x.signals.filter(keep).length + '</span>' +
+      (waiting ? '<span class="sig-tab-wait" title="' + waiting + ' waiting on you"></span>' : '') + '</button>';
+  }).join('') + '</div>';
+
+  const filters = [['all', 'All'], ['proposed', 'Waiting on you'], ['confirmed', 'Confirmed'], ['rejected', 'Turned off']];
+  const filterBar = '<div class="sig-filter" role="group" aria-label="Show">' + filters.map(([k, label]) =>
+    '<button class="' + (k === _sigFilter ? 'on' : '') + '" aria-pressed="' + (k === _sigFilter) +
+    '" onclick="setSignalView(undefined, undefined, ' + jsq(k) + ')">' + label + '</button>').join('') + '</div>';
+
+  // Only the undecided ones: "Confirm all" must never re-enable a signal
+  // you turned off (or "Skip all" turn off one you confirmed).
+  const pendingCodes = g.signals.filter(x => x.status === 'proposed').map(x => x.code);
+  const pending = escHtml(JSON.stringify(pendingCodes));
+  const undecided = pendingCodes.length;
+
+  const pager = pages > 1
+    ? '<div class="sig-pager">' +
+        '<button class="btn btn-secondary btn-sm" ' + (_sigPage ? '' : 'disabled ') +
+          'onclick="setSignalView(undefined, ' + (_sigPage - 1) + ')">&larr; Previous</button>' +
+        '<span class="muted">Page ' + (_sigPage + 1) + ' of ' + pages + ' &middot; ' + shown.length + ' signals</span>' +
+        '<button class="btn btn-secondary btn-sm" ' + (_sigPage < pages - 1 ? '' : 'disabled ') +
+          'onclick="setSignalView(undefined, ' + (_sigPage + 1) + ')">Next &rarr;</button>' +
+      '</div>'
+    : '';
+
+  grpEl.innerHTML = '<div class="sig-toolbar">' + tabs + filterBar + '</div>' +
+    '<div class="sig-group">' +
       '<div class="sig-group-head"><div>' +
         '<h3>' + escHtml(g.label) + '</h3><p>' + escHtml(g.blurb) + '</p>' +
       '</div>' +
@@ -802,11 +858,11 @@ async function loadSignals() {
           '</div>'
         : '') +
       '</div>' +
-      '<div class="card flush">' + g.signals.map(sigRow).join('') + '</div>' +
+      (slice.length
+        ? '<div class="card flush">' + slice.map(sigRow).join('') + '</div>'
+        : '<div class="card"><p class="muted">No signals here match this filter.</p></div>') +
+      pager +
     '</div>';
-  }).join('');
-
-  renderCohortBuilder();
 }
 
 function sigRow(sig) {
@@ -922,12 +978,21 @@ function pickProvider(key) {
   loadDiscoverProviders();
 }
 
+// Semicolons or new lines separate cities: "Nagpur, Maharashtra" is one city.
+// A list typed with bare commas and no spaces ("Khamgaon,Nagpur,Akola") is
+// taken as separate cities too, since no single place is written that way.
+function splitCities(raw) {
+  raw = String(raw || '').trim();
+  if (!raw) return [];
+  const sep = /[;\n]/.test(raw) || /,\s/.test(raw) ? /[;\n]/ : /[;,\n]/;
+  return raw.split(sep).map(c => c.trim()).filter(Boolean);
+}
+
 function discoverBody() {
   const raw = document.getElementById('disc-cities').value.trim();
   return {
     provider: _provider,
-    // Semicolons or newlines, never commas: "Denver, CO" is one city.
-    cities: raw ? raw.split(/[;\n]/).map(c => c.trim()).filter(Boolean) : [],
+    cities: splitCities(raw),
     depth: Number(document.getElementById('disc-depth').value) || 30,
     limit: Number(document.getElementById('disc-limit').value) || 100,
     max_spend: Number(document.getElementById('disc-cap').value) || 1,
@@ -949,8 +1014,15 @@ async function estimateDiscovery() {
   }
 
   const cap = discoverBody().max_spend;
-  const over = data.estimated_cost > cap;
-  el.innerHTML = '<div class="estimate-box">' +
+  const unlocated = data.unlocated || [];
+  const over = data.estimated_cost > cap || !data.located_all;
+  const where = unlocated.length
+    ? '<div class="test-result error" style="margin-bottom:12px">' +
+        'The map couldn\'t find ' + unlocated.map(c => '<b>' + escHtml(c) + '</b>').join(', ') +
+        (data.located_all ? ', so those searches will be skipped. ' : '. Nothing would be found. ') +
+        'Separate cities with ; and add the state, e.g. <i>Khamgaon, Maharashtra, India; Akola, Maharashtra, India</i>.</div>'
+    : '';
+  el.innerHTML = where + '<div class="estimate-box">' +
     '<div class="amount ' + (data.free ? 'free' : 'paid') + '">' +
       (data.free ? 'Free' : '$' + data.estimated_cost.toFixed(4)) + '</div>' +
     '<div class="muted" style="font-size:13px;margin-top:2px">' +
@@ -965,7 +1037,7 @@ async function estimateDiscovery() {
 
   const btn = document.getElementById('disc-run');
   btn.disabled = over;
-  btn.textContent = over ? 'Over cap'
+  btn.textContent = !data.located_all ? 'Fix the cities first' : over ? 'Over cap'
     : (data.free ? 'Run — free' : 'Run — spend up to $' + data.estimated_cost.toFixed(2));
 }
 
@@ -3209,9 +3281,13 @@ async function loadCompany() {
         <textarea class="form-input" id="co-i-titles" rows="4">${ce(lines(icp.titles))}</textarea></div>
       <div class="form-group"><label class="form-label" for="co-i-size">Company size</label>
         <input class="form-input" id="co-i-size" value="${ce(icp.company_size)}"></div>
-      <div class="form-group"><label class="form-label" for="co-i-geo">Where <span class="hint">one per line</span></label>
-        <textarea class="form-input" id="co-i-geo" rows="2">${ce(lines(icp.geography))}</textarea></div>
+      <div class="form-group"><label class="form-label" for="co-i-geo">Where <span class="hint">one city or region per line</span></label>
+        <textarea class="form-input" id="co-i-geo" rows="4">${ce(lines(icp.geography))}</textarea></div>
     </div>
+    <div class="form-group"><label class="form-label" for="co-i-phrases">Search phrases <span class="hint">optional. One line per industry: the industry, a colon, then short phrases separated by commas. Each phrase is searched in every city.</span></label>
+      <textarea class="form-input" id="co-i-phrases" rows="4" placeholder="Textile &amp; Spinning Mills: spinning mill, cotton ginning, textile mill">${ce(Object.entries(icp.keyword_variants || {}).map(([k, v]) => k + ': ' + v.join(', ')).join(String.fromCharCode(10)))}</textarea></div>
+    <div class="form-group"><label class="form-label" for="co-i-hiring">Hiring signals <span class="hint">optional. Job openings that suggest a company is ready to buy, one per line (e.g. Energy Manager)</span></label>
+      <textarea class="form-input" id="co-i-hiring" rows="2">${ce(lines(icp.hiring_signals))}</textarea></div>
     <div class="offer-actions"><button class="btn btn-primary btn-sm" onclick="saveCompanySection('icp')">Save</button></div>
   </section>
 
@@ -3223,6 +3299,8 @@ async function loadCompany() {
         <input class="form-input" id="co-s-name" value="${ce(s.name)}"></div>
       <div class="form-group"><label class="form-label" for="co-s-role">Role</label>
         <input class="form-input" id="co-s-role" value="${ce(s.role)}"></div>
+      <div class="form-group"><label class="form-label" for="co-s-email">Sender email <span class="hint">must be the mailbox you send from</span></label>
+        <input class="form-input" id="co-s-email" type="email" value="${ce(s.email || '')}"></div>
     </div>
     <div class="form-group"><label class="form-label" for="co-s-tone">Tone</label>
       <input class="form-input" id="co-s-tone" value="${ce(s.tone)}"></div>
@@ -3281,10 +3359,18 @@ async function saveCompanySection(section, objectionsOnly) {
     fields = {name: v('co-p-name'), pricing: v('co-p-pricing'), description: v('co-p-desc'),
               key_benefits: splitLines(v('co-p-benefits'))};
   } else if (section === 'icp') {
+    const phrases = {};
+    splitLines(v('co-i-phrases')).forEach(line => {
+      const at = line.indexOf(':');
+      if (at < 1) return;
+      const list = line.slice(at + 1).split(',').map(x => x.trim()).filter(Boolean);
+      if (list.length) phrases[line.slice(0, at).trim()] = list;
+    });
     fields = {industries: splitLines(v('co-i-industries')), titles: splitLines(v('co-i-titles')),
-              company_size: v('co-i-size'), geography: splitLines(v('co-i-geo'))};
+              company_size: v('co-i-size'), geography: splitLines(v('co-i-geo')),
+              keyword_variants: phrases, hiring_signals: splitLines(v('co-i-hiring'))};
   } else if (section === 'persona') {
-    fields = {name: v('co-s-name'), role: v('co-s-role'), tone: v('co-s-tone')};
+    fields = {name: v('co-s-name'), role: v('co-s-role'), tone: v('co-s-tone'), email: v('co-s-email').trim()};
   }
   const r = await api('/api/company', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                        body: JSON.stringify({section, fields})});
@@ -3363,3 +3449,199 @@ async function dismissProposedOffer() {
   d.addEventListener('close', () => { if (_inboxPoll) { clearInterval(_inboxPoll); _inboxPoll = null; } });
   d.addEventListener('click', e => { if (e.target === d) closeInboxDialog(); });
 })();
+
+// ── Email setup: mailbox, limits, template, logo, footer, hours ──
+
+let _emailSetup = null;
+let _logoUrl = null;
+
+const PROVIDER_LABELS = {
+  smtp: 'SMTP (Gmail app password, Zoho, most mailboxes)',
+  microsoft: 'Microsoft 365 / Outlook',
+  gmail: 'Google Workspace (sign-in)',
+  instantly: 'Instantly (legacy)',
+};
+
+async function loadEmailSetup() {
+  const body = document.getElementById('emailsetup-body');
+  const d = await api('/api/email-setup');
+  if (!d) { body.innerHTML = offlineState(); return; }
+  if (d.error) { body.innerHTML = `<p class="desc">${ce(d.error)}</p>`; return; }
+  _emailSetup = d;
+  const s = d.sending, sc = d.schedule, f = d.footer, sig = d.signature, tp = d.template;
+  body.innerHTML = `
+  <section class="card company-card" aria-labelledby="es-send-h">
+    <div class="company-card-head"><h3 id="es-send-h">Sending mailbox</h3>
+      <span class="hint">${s.require_approval ? 'Every email waits in the Outbox for your approval' : 'Autopilot is on'}</span></div>
+    <div class="company-grid">
+      <div class="form-group"><label class="form-label" for="es-provider">Mailbox type</label>
+        <select class="form-input" id="es-provider">${s.providers.map(p =>
+          `<option value="${ce(p)}"${p === s.provider ? ' selected' : ''}>${ce(PROVIDER_LABELS[p] || p)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label" for="es-from">Send from <span class="hint">the mailbox's own address</span></label>
+        <input class="form-input" id="es-from" type="email" value="${ce(s.sender_email || '')}"></div>
+      <div class="form-group"><label class="form-label" for="es-daily">Daily limit <span class="hint">cold emails a day, at most</span></label>
+        <input class="form-input" id="es-daily" type="number" min="0" max="2000" value="${ce(String(s.max_daily_sends))}"></div>
+    </div>
+    <p class="desc">The mailbox's login (server, password or sign-in) is on the <b>Settings</b> tab. The sender's name is on <b>Your company</b>. Start new mailboxes at 20 to 30 a day.</p>
+    <div class="offer-actions"><button class="btn btn-primary btn-sm" onclick="saveEmailSetup('sending')">Save</button></div>
+  </section>
+
+  <section class="card company-card" aria-labelledby="es-tpl-h">
+    <div class="company-card-head"><h3 id="es-tpl-h">Email template</h3>
+      <span class="hint">${tp.enabled ? 'Your template is in use' : 'Using the built-in style'}</span></div>
+    <p class="desc">Write the rules every email follows: length, structure, what to say about Chirayu Power, subject lines and sign-off. Each email is still written fresh for each company from what was found about it. Plain words work best, as if briefing a new salesperson.</p>
+    <label class="es-check"><input type="checkbox" id="es-tpl-on"${tp.enabled ? ' checked' : ''}> Use my template instead of the built-in style</label>
+    <div class="form-group"><label class="form-label" for="es-tpl-text">Template <span class="hint" id="es-tpl-count"></span></label>
+      <textarea class="form-input es-template" id="es-tpl-text" rows="16" maxlength="${tp.max_chars}" spellcheck="true">${ce(tp.text || '')}</textarea></div>
+    <div class="offer-actions">
+      <button class="btn btn-primary btn-sm" onclick="saveEmailSetup('template')">Save template</button>
+      <button class="btn btn-secondary btn-sm" onclick="useStarterTemplate()">${tp.text ? 'Replace with starter template' : 'Start from a starter template'}</button>
+      <button class="btn btn-secondary btn-sm" id="es-tpl-preview-btn" onclick="previewTemplate()">Preview an email</button>
+    </div>
+    <div id="es-tpl-preview" class="offer-preview" hidden></div>
+  </section>
+
+  <section class="card company-card" aria-labelledby="es-sig-h">
+    <div class="company-card-head"><h3 id="es-sig-h">Logo under every email</h3>
+      <span class="hint">PNG, JPEG or GIF, under ${Math.floor(sig.max_bytes / 1000)} KB</span></div>
+    <p class="desc">The image is embedded in each email, so it shows without the reader allowing images. With no logo, emails go out as plain text, which lands in the inbox most reliably.</p>
+    <div class="es-logo-row">
+      <div class="es-logo-box" id="es-logo-box">${sig.has_logo ? '<span class="desc">Loading...</span>' : '<span class="desc">No logo</span>'}</div>
+      <div class="offer-actions">
+        <label class="btn btn-secondary btn-sm es-upload">${sig.has_logo ? 'Replace image' : 'Upload image'}
+          <input type="file" accept="image/png,image/jpeg,image/gif" onchange="uploadLogo(this)" hidden></label>
+        ${sig.has_logo ? '<button class="btn btn-secondary btn-sm" onclick="removeLogo()">Remove</button>' : ''}
+      </div>
+    </div>
+    <div class="company-grid">
+      <div class="form-group"><label class="form-label" for="es-sig-width">Width in pixels</label>
+        <input class="form-input" id="es-sig-width" type="number" min="16" max="600" value="${ce(String(sig.width))}" oninput="sizeLogoPreview()"></div>
+      <div class="form-group"><label class="form-label" for="es-sig-alt">Text if images are off</label>
+        <input class="form-input" id="es-sig-alt" value="${ce(sig.alt || '')}" placeholder="Chirayu Power"></div>
+      <div class="form-group"><label class="form-label" for="es-sig-link">Logo opens <span class="hint">optional</span></label>
+        <input class="form-input" id="es-sig-link" value="${ce(sig.link || '')}" placeholder="https://chirayupower.com"></div>
+    </div>
+    <div class="offer-actions"><button class="btn btn-primary btn-sm" onclick="saveEmailSetup('signature')">Save</button></div>
+  </section>
+
+  <section class="card company-card" aria-labelledby="es-foot-h">
+    <div class="company-card-head"><h3 id="es-foot-h">Footer and opt-outs</h3>
+      <span class="hint">Added under every cold email</span></div>
+    ${f.postal_address ? '' : '<p class="notice wait">No postal address yet. Anti-spam laws expect one in every cold email.</p>'}
+    <div class="form-group"><label class="form-label" for="es-postal">Postal address</label>
+      <textarea class="form-input" id="es-postal" rows="2" placeholder="Chirayu Power Pvt. Ltd., street, city, PIN">${ce(f.postal_address || '')}</textarea></div>
+    <div class="form-group"><label class="form-label" for="es-optout">Opt-out line <span class="hint">how people can ask you to stop</span></label>
+      <input class="form-input" id="es-optout" value="${ce(f.opt_out_line || '')}" placeholder="${ce(f.default_opt_out_line)}"></div>
+    <div class="form-group"><label class="form-label" for="es-dnc">Never email <span class="hint">one address or domain per line: competitors, existing customers</span></label>
+      <textarea class="form-input" id="es-dnc" rows="3" placeholder="competitor.example&#10;someone@customer.example">${ce(lines(f.do_not_contact))}</textarea></div>
+    <div class="offer-actions"><button class="btn btn-primary btn-sm" onclick="saveEmailSetup('footer')">Save</button></div>
+  </section>
+
+  <section class="card company-card" aria-labelledby="es-hours-h">
+    <div class="company-card-head"><h3 id="es-hours-h">Working hours</h3>
+      <span class="hint">Nothing is sent or written in the quiet hours</span></div>
+    <div class="company-grid">
+      <div class="form-group"><label class="form-label" for="es-q-start">Quiet from</label>
+        <input class="form-input" id="es-q-start" type="time" value="${ce(sc.quiet_start)}"></div>
+      <div class="form-group"><label class="form-label" for="es-q-end">Until</label>
+        <input class="form-input" id="es-q-end" type="time" value="${ce(sc.quiet_end)}"></div>
+      <div class="form-group"><label class="form-label" for="es-tz">Time zone</label>
+        <input class="form-input" id="es-tz" list="es-tz-list" value="${ce(sc.timezone)}">
+        <datalist id="es-tz-list">${sc.timezones.map(z => `<option value="${ce(z)}">`).join('')}</datalist></div>
+      <div class="form-group"><label class="form-label" for="es-beat">Check for work every <span class="hint">minutes</span></label>
+        <input class="form-input" id="es-beat" type="number" min="1" max="1440" value="${ce(String(sc.heartbeat_interval_minutes))}"></div>
+    </div>
+    <div class="offer-actions"><button class="btn btn-primary btn-sm" onclick="saveEmailSetup('schedule')">Save</button></div>
+  </section>`;
+  const ta = document.getElementById('es-tpl-text');
+  ta.addEventListener('input', countTemplate);
+  countTemplate();
+  if (sig.has_logo) showLogoPreview();
+}
+
+function countTemplate() {
+  const ta = document.getElementById('es-tpl-text'), out = document.getElementById('es-tpl-count');
+  if (ta && out && _emailSetup) out.textContent = ta.value.length.toLocaleString() + ' / ' + _emailSetup.template.max_chars.toLocaleString() + ' characters';
+}
+
+function useStarterTemplate() {
+  const ta = document.getElementById('es-tpl-text');
+  if (ta.value.trim() && !confirm('Replace what is in the box with the starter template?')) return;
+  ta.value = _emailSetup.template.starter;
+  document.getElementById('es-tpl-on').checked = true;
+  countTemplate();
+  ta.focus();
+}
+
+async function saveEmailSetup(section) {
+  const v = id => document.getElementById(id).value;
+  let fields;
+  if (section === 'sending') fields = {provider: v('es-provider'), sender_email: v('es-from').trim(), max_daily_sends: v('es-daily')};
+  else if (section === 'template') fields = {enabled: document.getElementById('es-tpl-on').checked, text: v('es-tpl-text')};
+  else if (section === 'signature') fields = {width: v('es-sig-width'), alt: v('es-sig-alt'), link: v('es-sig-link').trim()};
+  else if (section === 'footer') fields = {postal_address: v('es-postal'), opt_out_line: v('es-optout'), do_not_contact: splitLines(v('es-dnc'))};
+  else if (section === 'schedule') fields = {quiet_start: v('es-q-start'), quiet_end: v('es-q-end'), timezone: v('es-tz').trim(), heartbeat_interval_minutes: v('es-beat')};
+  const r = await api('/api/email-setup', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                          body: JSON.stringify({section, fields})});
+  if (r && r.success) { showToast(r.message, 'success'); loadEmailSetup(); }
+  else showToast((r && r.message) || 'Couldn\'t save.', 'error');
+}
+
+async function previewTemplate() {
+  const box = document.getElementById('es-tpl-preview'), btn = document.getElementById('es-tpl-preview-btn');
+  const company = await api('/api/company');
+  const entry = company && company.offer && company.offer.entry;
+  if (!entry) { showToast('Set your offer on Your company first; the preview uses it.', 'error'); return; }
+  btn.disabled = true; btn.textContent = 'Writing...';
+  box.hidden = false;
+  box.innerHTML = '<p class="desc">Writing a sample first email with your saved template. Save the template first to preview your latest changes. Nothing is sent.</p>';
+  const r = await api('/api/offer/preview', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                            body: JSON.stringify({entry})});
+  btn.disabled = false; btn.textContent = 'Preview an email';
+  if (!r || !r.ok) { box.innerHTML = `<p class="desc">${ce((r && r.message) || 'The preview failed. Try again.')}</p>`; return; }
+  box.innerHTML = `<div class="form-label">Sample for ${ce(r.to)} (not saved, not sent)</div>
+    <div class="offer-mail"><div class="offer-mail-subject">${ce(r.subject)}</div><pre>${ce(r.body)}</pre>
+    <div id="es-preview-logo"></div></div>`;
+  if (_logoUrl) document.getElementById('es-preview-logo').innerHTML =
+    `<img src="${_logoUrl}" alt="" style="width:${Number(document.getElementById('es-sig-width').value) || 120}px;margin-top:12px">`;
+}
+
+async function showLogoPreview() {
+  const box = document.getElementById('es-logo-box');
+  try {
+    const r = await authFetch('/api/email-setup/logo');
+    if (!r.ok) { box.innerHTML = '<span class="desc">The logo file is missing. Upload it again.</span>'; return; }
+    const blob = await r.blob();
+    _logoUrl = await new Promise((ok, bad) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = bad; fr.readAsDataURL(blob); });
+    box.innerHTML = `<img id="es-logo-img" src="${_logoUrl}" alt="Your email logo">`;
+    sizeLogoPreview();
+  } catch { box.innerHTML = '<span class="desc">Couldn\'t load the logo.</span>'; }
+}
+
+function sizeLogoPreview() {
+  const img = document.getElementById('es-logo-img'), w = Number(document.getElementById('es-sig-width').value);
+  if (img && w) img.style.width = Math.min(Math.max(w, 16), 600) + 'px';
+}
+
+function uploadLogo(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const max = _emailSetup.signature.max_bytes;
+  if (file.size > max) { showToast(`That image is ${Math.round(file.size / 1000)} KB. Keep it under ${Math.floor(max / 1000)} KB (about 400 px wide).`, 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const r = await api('/api/email-setup/logo', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                 body: JSON.stringify({data: reader.result})});
+    if (r && r.success) { showToast(r.message, 'success'); loadEmailSetup(); }
+    else showToast((r && r.message) || 'Couldn\'t upload the image.', 'error');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function removeLogo() {
+  if (!confirm('Remove the logo? Emails go back to plain text.')) return;
+  const r = await api('/api/email-setup/logo', {method: 'DELETE'});
+  if (r && r.success) { showToast(r.message, 'success'); _logoUrl = null; loadEmailSetup(); }
+  else showToast((r && r.message) || 'Couldn\'t remove the logo.', 'error');
+}

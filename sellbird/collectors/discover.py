@@ -1089,6 +1089,38 @@ class OpenStreetMap(DiscoveryProvider):
 
     # A friendly term maps to the OSM tags that actually carry those businesses.
     TAG_MAP = {
+        # Industrial and institutional buyers (C&I solar). Order matters: the
+        # first needle found wins, so "hotel" comes before "hospital" (so
+        # "Hospitality" isn't read as hospitals) and colleges/schools before
+        # "engineering" (so "engineering colleges" aren't read as factories).
+        "hotel": ['tourism=hotel'],
+        "resort": ['tourism=hotel'],
+        " mall": ['shop=mall'],          # leading space: not "small"
+        "hospital": ['amenity=hospital'],
+        "nursing home": ['amenity=hospital', 'social_facility=nursing_home'],
+        "diagnostic": ['healthcare=laboratory'],
+        "college": ['amenity=college', 'amenity=university'],
+        "universit": ['amenity=university'],
+        "school": ['amenity=school'],
+        "warehouse": ['building=warehouse', 'industrial=warehouse'],
+        "cold storage": ['industrial=cold_storage', 'building=warehouse'],
+        "textile": ['man_made=works', 'industrial=factory'],
+        "spinning": ['man_made=works', 'industrial=factory'],
+        "ginning": ['man_made=works', 'industrial=factory'],
+        "mill": ['man_made=works', 'industrial=factory'],
+        "dairy": ['man_made=works', 'industrial=factory'],
+        "food process": ['man_made=works', 'industrial=factory'],
+        "agro": ['man_made=works', 'industrial=factory'],
+        "pharma": ['man_made=works', 'industrial=factory'],
+        "chemical": ['man_made=works', 'industrial=factory'],
+        "plastic": ['man_made=works', 'industrial=factory'],
+        "packaging": ['man_made=works', 'industrial=factory'],
+        "manufactur": ['man_made=works', 'industrial=factory'],
+        "factory": ['man_made=works', 'industrial=factory'],
+        "industr": ['man_made=works', 'industrial=factory'],
+        "engineering": ['man_made=works', 'industrial=factory'],
+        "mining": ['industrial=mine', 'landuse=quarry'],
+        "mineral": ['industrial=mine', 'landuse=quarry'],
         "roof": ['craft=roofer', 'shop=roofing'],
         "plumb": ['craft=plumber'],
         "hvac": ['craft=hvac'],

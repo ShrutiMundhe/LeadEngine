@@ -169,12 +169,13 @@ PROPOSED_KEY = "offer_proposed"
 EDITABLE = {
     "product": {"name": str, "description": str, "pricing": str, "key_benefits": list,
                 "objection_responses": dict},
-    "persona": {"name": str, "role": str, "tone": str},
-    "icp": {"industries": list, "titles": list, "company_size": str, "geography": list},
+    "persona": {"name": str, "role": str, "tone": str, "email": str},
+    "icp": {"industries": list, "titles": list, "company_size": str, "geography": list,
+            "hiring_signals": list, "keyword_variants": "phrases"},
     "offer": {"entry": str},
 }
 MAX_TEXT = 2000
-MAX_ITEMS = 30
+MAX_ITEMS = 500
 
 
 def _skill_text(root: Path, name: str) -> str:
@@ -196,7 +197,9 @@ def company_view(config, root: Path, proposed: dict | None = None) -> dict:
         "persona": {"name": s.name, "role": s.role, "company": s.company, "tone": s.tone,
                     "email": getattr(s, "email", "")},
         "icp": {"industries": list(icp.industries or []), "titles": list(icp.titles or []),
-                "company_size": icp.company_size, "geography": list(icp.geography or [])},
+                "company_size": icp.company_size, "geography": list(icp.geography or []),
+                "hiring_signals": list(icp.hiring_signals or []),
+                "keyword_variants": {k: list(v) for k, v in (icp.keyword_variants or {}).items()}},
         "offer": {**offer_view(config), "proposed": proposed or None},
         "knowledge": _skill_text(root, "product_knowledge"),
         "competitors": _skill_text(root, "competitive_intel"),
@@ -209,6 +212,18 @@ def _clean(kind, value):
     if kind is list:
         items = value if isinstance(value, list) else str(value or "").split("\n")
         return [" ".join(str(i).split())[:MAX_TEXT] for i in items if str(i).strip()][:MAX_ITEMS]
+    if kind == "phrases":
+        # industry -> extra search phrases, e.g. {"Textile mills": ["spinning mill", "ginning"]}
+        if not isinstance(value, dict):
+            raise ValueError("expected search phrases for each industry")
+        out = {}
+        for k, v in list(value.items())[:MAX_ITEMS]:
+            key = " ".join(str(k).split())[:MAX_TEXT]
+            items = v if isinstance(v, list) else str(v or "").replace(",", "\n").split("\n")
+            phrases = [" ".join(str(i).split())[:200] for i in items if str(i).strip()][:50]
+            if key and phrases:
+                out[key] = phrases
+        return out
     if kind is dict:
         if not isinstance(value, dict):
             raise ValueError("expected a list of objections and answers")
@@ -239,8 +254,15 @@ def save_company(config_file: Path, section: str, fields: dict) -> dict:
         target = data.setdefault(section, {})
     if not isinstance(target, dict):
         raise ValueError(f"{section} in {config_file.name} isn't a section Sellbird can edit")
+    if section == "persona" and "email" in cleaned and cleaned["email"] and (
+            "@" not in cleaned["email"] or " " in cleaned["email"]):
+        raise ValueError("the sender email doesn't look like an email address")
     target.update(cleaned)
-    config_file.with_name(config_file.name + ".bak").write_text(raw, encoding="utf-8")
-    config_file.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False,
-                                          allow_unicode=True), encoding="utf-8")
+    # Check the whole file still loads before writing it, so a save from the
+    # dashboard can never leave Sellbird unable to start.
+    from sellbird.email_setup import SetupError, write_validated
+    try:
+        write_validated(config_file, raw, data)
+    except SetupError as e:
+        raise ValueError(str(e)) from None
     return cleaned

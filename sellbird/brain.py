@@ -220,6 +220,21 @@ class Brain:
             return self.unavailable
         if self.unavailable:
             await self._mark_available()
+        elif not self._status_synced:
+            # A setup pause recorded by an earlier run (say, before the CLI
+            # was installed) must not outlive the problem, as for Codex.
+            self._status_synced = True
+            try:
+                stored = parse_brain_status(await self.state.get_setting(BRAIN_STATUS_KEY))
+            except Exception:
+                stored = {}
+            until = stored.get("until")
+            if (stored.get("status") == "paused" and stored.get("kind") == "usage_limit"
+                    and isinstance(until, (int, float)) and until > time.time()):
+                self._usage_limited_until = time.monotonic() + (until - time.time())
+                self._usage_pause_recorded = True
+            elif stored.get("status") == "paused":
+                await self._mark_available()
         return ""
 
     def _fingerprint(self):
